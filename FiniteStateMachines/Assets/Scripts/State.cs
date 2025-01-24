@@ -24,7 +24,7 @@ public class State
     protected State nextState;
     protected NavMeshAgent agent;
 
-    float visDistance = 10.0f;
+    float visDist = 10.0f;
     float visAngle = 30.0f;
     float shootDist = 7.0f;
 
@@ -51,6 +51,28 @@ public class State
             return nextState;
         }
         return this;
+    }
+
+    public bool CanSeePlayer()
+    {
+        Vector3 direction = player.position - npc.transform.position;
+        float angle = Vector3.Angle(direction, npc.transform.forward);
+
+        if(direction.magnitude < visDist && angle < visAngle)
+        {
+            return true;
+        }
+        return false;
+    }
+
+    public bool CanAttackPlayer()
+    {
+        Vector3 direction = player.position - npc.transform.position;
+        if(direction.magnitude < shootDist)
+        {
+            return true;
+        }
+        return false;
     }
 }
 
@@ -119,6 +141,77 @@ public class Patrol : State
     public override void Exit()
     {
         anim.ResetTrigger("isWalking");
+        base.Exit();
+    }
+}
+
+public class Pursue : State
+{
+    public Pursue(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
+        : base(_npc, _agent, _anim, _player)
+    { 
+    name = STATE.PURSUE;
+        agent.speed = 5;
+        agent.isStopped = false;
+    }
+
+    public override void Enter()
+    {
+        anim.SetTrigger("isRunning");
+        base.Enter();
+    }
+
+    public override void Update()
+    {
+        agent.SetDestination(player.position);
+        if (agent.hasPath)
+        {
+            if (CanAttackPlayer())
+            {
+                nextState = new Attack(npc, agent, anim, player);
+                stage = EVENT.EXIT;
+            }
+            else if (!CanSeePlayer())
+            {
+                nextState = new Patrol(npc, agent, anim, player);
+                stage = EVENT.EXIT;
+            }
+        }
+    }
+
+    public override void Exit()
+    {
+        anim.ResetTrigger("isRunning");
+        base.Exit();
+    }
+}
+
+public class Attack : State
+{
+    float rotSpeed = 2.0f;
+    AudioSource shoot;
+    public Attack(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
+        : base(_npc, _agent, _anim, _player)
+    {
+        name = STATE.ATTACK;
+        shoot = _npc.GetComponent<AudioSource>();
+    }
+
+    public override void Enter()
+    {
+        anim.SetTrigger("isShooting");
+        agent.isStopped = true;
+        shoot.Play();
+        base.Enter();
+    }
+
+    public override void Update()
+    {
+        base.Update();
+    }
+
+    public override void Exit()
+    {
         base.Exit();
     }
 }
