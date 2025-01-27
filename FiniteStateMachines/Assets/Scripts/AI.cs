@@ -9,12 +9,13 @@ public class AI : MonoBehaviour
     Animator anim;
     public Transform player;
     State currentState;
+    public Transform cube;
 
     void Start()
     {
         agent = GetComponent<NavMeshAgent>();
         anim = GetComponent<Animator>();
-        currentState = new Idle(gameObject, agent, anim, player);
+        currentState = new Idle(gameObject, agent, anim, player, cube);
     }
 
     void Update()

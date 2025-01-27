@@ -1,5 +1,7 @@
+using Cinemachine.Utility;
 using System.Collections;
 using System.Collections.Generic;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -8,7 +10,7 @@ public class State
     //my head hurts rn :(
     public enum STATE
     {
-        IDLE, PATROL, PURSUE, ATTACK, SLEEP
+        IDLE, PATROL, PURSUE, ATTACK, SLEEP, CUBE
     }
 
     public enum EVENT
@@ -23,17 +25,20 @@ public class State
     protected Transform player;
     protected State nextState;
     protected NavMeshAgent agent;
+    protected Transform cube;
 
     float visDist = 10.0f;
     float visAngle = 30.0f;
     float shootDist = 7.0f;
+    float spookDist = 3.0f;
 
-    public State(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
+    public State(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player, Transform _cube)
     {
         npc = _npc;
         anim = _anim;
         player = _player;
         agent = _agent;
+        cube = _cube;
         stage = EVENT.ENTER;
     }
 
@@ -74,12 +79,24 @@ public class State
         }
         return false;
     }
+
+    public bool isSpooked()
+    {
+        Vector3 direction = player.position - npc.transform.position;
+        float angle = Vector3.Angle(direction, npc.transform.forward);
+
+        if (direction.magnitude < spookDist && -angle < visAngle)
+        {
+            return true;
+        }
+        return false;
+    }
 }
 
 public class Idle : State
 {
-    public Idle(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
-        : base(_npc, _agent, _anim, _player)
+    public Idle(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player, Transform _cube)
+        : base(_npc, _agent, _anim, _player, _cube)
     {
         name = STATE.IDLE;
     }
@@ -92,9 +109,14 @@ public class Idle : State
 
     public override void Update()
     {
-        if(Random.Range(0, 100) < 10)
+        if (CanSeePlayer())
         {
-            nextState = new Patrol(npc, agent, anim, player);
+            nextState = new Pursue(npc, agent, anim, player, cube);
+            stage = EVENT.EXIT;
+        }
+        else if(Random.Range(0, 100) < 10)
+        {
+            nextState = new Patrol(npc, agent, anim, player, cube);
             stage = EVENT.EXIT;
         }
     }
@@ -109,8 +131,8 @@ public class Idle : State
 public class Patrol : State
 {
     int currentIndex = -1;
-    public Patrol(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
-        : base(_npc,_agent, _anim, _player)
+    public Patrol(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player, Transform _cube)
+        : base(_npc,_agent, _anim, _player, _cube)
     {
         name = STATE.PATROL;
         agent.speed = 2;
@@ -119,7 +141,17 @@ public class Patrol : State
 
     public override void Enter()
     {
-        currentIndex = 0;
+        float lastDist = Mathf.Infinity;
+        for(int i = 0; i < GameEnvironment.Singleton.Checkpoints.Count; i++)
+        {
+            GameObject thisWP = GameEnvironment.Singleton.Checkpoints[i];
+            float distance = Vector3.Distance(npc.transform.position, thisWP.transform.position);
+            if (distance < lastDist)
+            {
+                lastDist = distance;
+                currentIndex = i-1;
+            }
+        }
         anim.SetTrigger("isWalking");
         base.Enter();
     }
@@ -136,6 +168,18 @@ public class Patrol : State
 
             agent.SetDestination(GameEnvironment.Singleton.Checkpoints[currentIndex].transform.position);
         }
+
+        if (CanSeePlayer())
+        {
+            nextState = new Pursue(npc, agent, anim, player, cube);
+            stage = EVENT.EXIT;
+        }
+
+        if (isSpooked())
+        {
+            nextState = new Cube(npc, agent, anim, player, cube);
+            stage = EVENT.EXIT;
+        }
     }
 
     public override void Exit()
@@ -147,8 +191,8 @@ public class Patrol : State
 
 public class Pursue : State
 {
-    public Pursue(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
-        : base(_npc, _agent, _anim, _player)
+    public Pursue(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player, Transform _cube)
+        : base(_npc, _agent, _anim, _player, _cube)
     { 
     name = STATE.PURSUE;
         agent.speed = 5;
@@ -168,12 +212,12 @@ public class Pursue : State
         {
             if (CanAttackPlayer())
             {
-                nextState = new Attack(npc, agent, anim, player);
+                nextState = new Attack(npc, agent, anim, player, cube);
                 stage = EVENT.EXIT;
             }
             else if (!CanSeePlayer())
             {
-                nextState = new Patrol(npc, agent, anim, player);
+                nextState = new Patrol(npc, agent, anim, player, cube);
                 stage = EVENT.EXIT;
             }
         }
@@ -190,8 +234,8 @@ public class Attack : State
 {
     float rotSpeed = 2.0f;
     AudioSource shoot;
-    public Attack(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player)
-        : base(_npc, _agent, _anim, _player)
+    public Attack(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player, Transform _cube)
+        : base(_npc, _agent, _anim, _player, _cube)
     {
         name = STATE.ATTACK;
         shoot = _npc.GetComponent<AudioSource>();
@@ -207,11 +251,52 @@ public class Attack : State
 
     public override void Update()
     {
-        base.Update();
+        Vector3 direction = player.position - npc.transform.position;
+        float angle = Vector3.Angle(direction, npc.transform.forward);
+        direction.y = 0f;
+
+        npc.transform.rotation = Quaternion.Slerp(npc.transform.rotation, Quaternion.LookRotation(direction), Time.deltaTime * rotSpeed);
+        if (!CanAttackPlayer())
+        {
+            nextState = new Idle(npc, agent, anim, player, cube);
+            stage = EVENT.EXIT;
+        }
     }
 
     public override void Exit()
     {
+        anim.ResetTrigger("isShooting");
+        shoot.Stop();
+        base.Exit();
+    }
+}
+
+public class Cube : State
+{
+    public Cube(GameObject _npc, NavMeshAgent _agent, Animator _anim, Transform _player, Transform _cube)
+        : base(_npc, _agent, _anim, _player, _cube)
+    {
+        name = STATE.CUBE;
+    }
+
+    public override void Enter()
+    {
+        anim.SetTrigger("isRunning");
+        agent.speed = 5;
+        base.Enter();
+    }
+    public override void Update()
+    {
+        agent.SetDestination(cube.position);
+        if (agent.remainingDistance < 1)
+        {
+            nextState = new Idle(npc, agent, anim, player, cube);
+            stage = EVENT.EXIT;
+        }
+    }
+    public override void Exit()
+    {
+        anim.ResetTrigger("isRunning");
         base.Exit();
     }
 }
